@@ -10,7 +10,6 @@
   hr { margin: 25px 0; }
   #status { color: #333; }
   #userEmail { color: green; }
-  #userPhoto { width: 60px; height: 60px; border-radius: 50%; display: none; margin-top: 10px; }
 </style>
 </head>
 <body>
@@ -30,13 +29,8 @@
   <button onclick="forgotPassword()">Forgot Password?</button>
 
   <hr/>
-  <h2>Or continue with</h2>
-  <button onclick="googleSignIn()">Sign in with Google</button>
-
-  <hr/>
   <h3 id="status">Checking login status...</h3>
   <h3 id="userEmail"></h3>
-  <img id="userPhoto" src="" alt="Profile photo" />
 
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
@@ -46,9 +40,7 @@
     signInWithEmailAndPassword,
     sendEmailVerification,
     sendPasswordResetEmail,
-    onAuthStateChanged,
-    GoogleAuthProvider,
-    signInWithPopup
+    onAuthStateChanged
   } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
 
   const firebaseConfig = {
@@ -63,7 +55,6 @@
 
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
-  const googleProvider = new GoogleAuthProvider();
 
   const BACKEND_URL = "http://localhost:5000";
 
@@ -75,7 +66,6 @@
 
   const statusEl = document.getElementById("status");
   const userEmailEl = document.getElementById("userEmail");
-  const userPhotoEl = document.getElementById("userPhoto");
 
   // ---------- Backend sync helper ----------
   async function syncWithBackend(user) {
@@ -91,14 +81,7 @@
 
     if (res.ok) {
       statusEl.innerText = "✅ Logged in successfully!";
-      userEmailEl.innerText = `Welcome, ${data.user.name || data.user.email}!`;
-
-      if (data.user.photoURL) {
-        userPhotoEl.src = data.user.photoURL;
-        userPhotoEl.style.display = "inline-block";
-      } else {
-        userPhotoEl.style.display = "none";
-      }
+      userEmailEl.innerText = "Logged in as: " + data.user.email;
     } else {
       statusEl.innerText = "❌ " + data.message;
     }
@@ -216,18 +199,6 @@
     try {
       await sendPasswordResetEmail(auth, email);
       statusEl.innerText = "✅ Password reset link bhej diya gaya hai aapke email pe.";
-    } catch (err) {
-      statusEl.innerText = "❌ " + err.message;
-    }
-  };
-
-  // ---------- Google Sign-In ----------
-  window.googleSignIn = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      // Google account hamesha verified hota hai, seedha sync karo
-      await syncWithBackend(user);
     } catch (err) {
       statusEl.innerText = "❌ " + err.message;
     }
