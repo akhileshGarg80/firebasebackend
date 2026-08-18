@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Firebase Auth Test</title>
+<style>
+  body { font-family: Arial, sans-serif; max-width: 500px; margin: 40px auto; padding: 0 20px; }
+  input { display: block; width: 100%; margin: 8px 0; padding: 8px; box-sizing: border-box; }
+  button { margin: 5px 5px 5px 0; padding: 8px 14px; cursor: pointer; }
+  hr { margin: 25px 0; }
+  #status { color: #333; }
+  #userEmail { color: green; }
+  #userPhoto { width: 60px; height: 60px; border-radius: 50%; display: none; margin-top: 10px; }
+</style>
+</head>
+<body>
+
+  <h2>Register</h2>
+  <input type="email" id="regEmail" placeholder="Email" />
+  <input type="text" id="regPassword" placeholder="Password" />
+  <button onclick="generatePassword()">Generate Random Password</button>
+  <button onclick="registerUser()">Register</button>
+
+  <hr/>
+
+  <h2>Login</h2>
+  <input type="email" id="loginEmail" placeholder="Email" />
+  <input type="password" id="loginPassword" placeholder="Password" />
+  <button onclick="loginUser()">Login</button>
+  <button onclick="forgotPassword()">Forgot Password?</button>
+
+  <hr/>
+  <h2>Or continue with</h2>
+  <button onclick="googleSignIn()">Sign in with Google</button>
+
+  <hr/>
+  <h3 id="status">Checking login status...</h3>
+  <h3 id="userEmail"></h3>
+  <img id="userPhoto" src="" alt="Profile photo" />
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js";
+  import {
+    getAuth,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    sendEmailVerification,
+    sendPasswordResetEmail,
+    onAuthStateChanged,
+    GoogleAuthProvider,
+    signInWithPopup
+  } from "https://www.gstatic.com/firebasejs/12.17.1/firebase-auth.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBj98LW5fIuKYANDhnXuDZSFarZIkEc8zE",
+    authDomain: "firbase-backend-aebe6.firebaseapp.com",
+    projectId: "firbase-backend-aebe6",
+    storageBucket: "firbase-backend-aebe6.firebasestorage.app",
+    messagingSenderId: "104519463646",
+    appId: "1:104519463646:web:1e150ace3c8335e5ae484f",
+    measurementId: "G-1SZCT4EZVT"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const googleProvider = new GoogleAuthProvider();
+
+  const BACKEND_URL = "http://localhost:5000";
+
+  // Verification link click karne ke baad wapas isi page pe redirect ho
+  const actionCodeSettings = {
+    url: window.location.href,
+    handleCodeInApp: false,
+  };
+
+  const statusEl = document.getElementById("status");
+  const userEmailEl = document.getElementById("userEmail");
+  const userPhotoEl = document.getElementById("userPhoto");
+
+  // ---------- Backend sync helper ----------
+  async function syncWithBackend(user) {
+    const idToken = await user.getIdToken(true); // force refresh token
+    const res = await fetch(`${BACKEND_URL}/api/auth/sync`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${idToken}`,
+      },
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      statusEl.innerText = "✅ Logged in successfully!";
+      userEmailEl.innerText = `Welcome, ${data.user.name || data.user.email}!`;
+
+      if (data.user.photoURL) {
+        userPhotoEl.src = data.user.photoURL;
+        userPhotoEl.style.display = "inline-block";
+      } else {
+        userPhotoEl.style.display = "none";
+      }
+    } else {
+      statusEl.innerText = "❌ " + data.message;
+    }
+  }
+
+  // ---------- Auto-check on page load / after verify redirect ----------
+  onAuthStateChanged(auth, async (user) => {
+    if (!user) {
+      statusEl.innerText = "Please register or login.";
+      return;
+    }
+
+    await user.reload(); // latest verification status fetch karo
+
+    if (user.emailVerified) {
+      statusEl.innerText = "✅ Email verified! Logging you in automatically...";
+      await syncWithBackend(user);
+    } else {
+      statusEl.innerText = "⚠️ Email verify nahi hua abhi. Apna Gmail check karo aur link pe click karo.";
+    }
+  });
+
+  // ---------- Helpers ----------
+  window.generatePassword = () => {
+    const pass = Math.random().toString(36).slice(-10) + "A1!";
+    document.getElementById("regPassword").value = pass;
+  };
+
+  // ---------- Register ----------
+  window.registerUser = async () => {
+    const email = document.getElementById("regEmail").value;
+    const password = document.getElementById("regPassword").value;
+
+    if (!email || !password) {
+      statusEl.innerText = "⚠️ Email aur password dono zaroori hain.";
+      return;
+    }
+
+    try {
+      const userCred = await createUserWithEmailAndPassword(auth, email, password);
+      await sendEmailVerification(userCred.user, actionCodeSettings);
+      statusEl.innerText = "✅ Registered! Verification link bheja gaya hai email pe. Link click karte hi yahi wapas aa jaoge aur automatically login ho jaoge.";
+    } catch (err) {
+      if (err.code === "auth/email-already-in-use") {
+        statusEl.innerText = "⏳ Check kar rahe hain...";
+
+        try {
+          const checkRes = await fetch(`${BACKEND_URL}/api/auth/check-unverified`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          });
+          const checkData = await checkRes.json();
+
+          if (checkData.verified) {
+            statusEl.innerText = "ℹ️ Yeh account already verified hai. Please login karo.";
+            return;
+          }
+
+          if (checkData.deleted) {
+            try {
+              const newUserCred = await createUserWithEmailAndPassword(auth, email, password);
+              await sendEmailVerification(newUserCred.user, actionCodeSettings);
+              statusEl.innerText = "✅ Purana unverified attempt hata diya gaya. Naya register ho gaya! Verification link bhej diya.";
+            } catch (retryErr) {
+              statusEl.innerText = "❌ " + retryErr.message;
+            }
+          } else {
+            statusEl.innerText = "❌ Kuch gadbad ho gayi, dobara try karo.";
+          }
+        } catch (backendErr) {
+          statusEl.innerText = "❌ Backend se connect nahi ho paaya: " + backendErr.message;
+        }
+      } else {
+        statusEl.innerText = "❌ " + err.message;
+      }
+    }
+  };
+
+  // ---------- Login ----------
+  window.loginUser = async () => {
+    const email = document.getElementById("loginEmail").value;
+    const password = document.getElementById("loginPassword").value;
+
+    if (!email || !password) {
+      statusEl.innerText = "⚠️ Email aur password dono zaroori hain.";
+      return;
+    }
+
+    try {
+      const userCred = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCred.user;
+
+      if (!user.emailVerified) {
+        await sendEmailVerification(user, actionCodeSettings);
+        statusEl.innerText = "⚠️ Email verified nahi hai. Verification link dubara bheja gaya hai.";
+        return;
+      }
+
+      await syncWithBackend(user);
+    } catch (err) {
+      statusEl.innerText = "❌ " + err.message;
+    }
+  };
+
+  // ---------- Forgot Password ----------
+  window.forgotPassword = async () => {
+    const email = document.getElementById("loginEmail").value;
+
+    if (!email) {
+      statusEl.innerText = "⚠️ Pehle login wale email field mai email daalo.";
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, email);
+      statusEl.innerText = "✅ Password reset link bhej diya gaya hai aapke email pe.";
+    } catch (err) {
+      statusEl.innerText = "❌ " + err.message;
+    }
+  };
+
+  // ---------- Google Sign-In ----------
+  window.googleSignIn = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      // Google account hamesha verified hota hai, seedha sync karo
+      await syncWithBackend(user);
+    } catch (err) {
+      statusEl.innerText = "❌ " + err.message;
+    }
+  };
+</script>
+</body>
+</html>
